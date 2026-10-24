@@ -56,6 +56,23 @@ pointing this at apt-cacher-ng would cache all 120 GiB.
 `arch:all` packages are in the `binary-amd64` index, so one architecture covers them.
 Add `ARCH=` passes only if you care about per-architecture binaries.
 
+### Memory
+
+The scanner reads a file whole into memory up to 1 GiB, so `JOBS` parallel scanners
+can ask for `JOBS` GiB. On a 2 GB box with no swap the OOM killer takes one out, and
+`run.sh` records that deb in `out/failed` — the pipeline fails, so nothing silently
+goes missing, but those debs do need a second pass. Cap the buffer instead:
+
+    CACERT_SCAN_MAX_MB=128 JOBS=4 scripts/debian/run.sh out
+
+Budget `JOBS × CACERT_SCAN_MAX_MB` plus a few hundred MB. The cap costs nothing for
+plain files — a 55 MB `libnode.so` yields the same 142 roots at 1 MB as at 1 GiB, via
+the chunked path — but an archive *larger* than the cap is not unpacked, so a huge jar
+or wheel would be skipped. Re-run those few at a higher cap with `JOBS=1`:
+
+    sort -u out/failed > out/retry.txt && : > out/failed
+    JOBS=1 scripts/debian/run.sh out out/retry.txt
+
 ## Output
 
 `out/report/`:

@@ -6,15 +6,27 @@ use std::collections::{BTreeSet, HashMap};
 use std::io::{self, BufReader, Cursor, Read, Write};
 use std::path::Path;
 
-const MAX_IN_MEMORY: u64 = 1 << 30;
+const MAX_BUF_DEFAULT: u64 = 1 << 30;
 const CHUNK: usize = 256 << 20;
 const OVERLAP: usize = 64 << 10;
 const TRUST_STORE_HINT: usize = 3;
 const MAX_DEPTH: usize = 4;
-const MAX_UNPACKED: u64 = 1 << 30;
+
 const MIN_BARE_B64: usize = 600;
 // common store passwords seen in Java truststores; "" covers password-less PKCS12
 const P12_PASSWORDS: &[&str] = &["changeit", "", "changeme", "password", "secret", "123456", "truststore", "keystore", "notasecret"];
+
+/// Largest file read whole into memory, and largest archive member unpacked.
+/// Above it a file takes the chunked path, where archives are not unpacked.
+/// $CACERT_SCAN_MAX_MB lowers it: N parallel scanners on a small machine can
+/// otherwise ask for N GiB at once and get killed by the OOM killer.
+fn max_buf() -> u64 {
+    static MAX: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *MAX.get_or_init(|| match std::env::var("CACERT_SCAN_MAX_MB") {
+        Ok(v) => v.trim().parse::<u64>().map(|mb| mb << 20).unwrap_or(MAX_BUF_DEFAULT),
+        Err(_) => MAX_BUF_DEFAULT,
+    })
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -366,7 +378,7 @@ impl Ctx<'_> {
 
     fn unpack(&mut self, path: &str, how: &str, r: impl Read, depth: usize) {
         let mut buf = Vec::new();
-        if r.take(MAX_UNPACKED).read_to_end(&mut buf).is_ok() && !buf.is_empty() {
+        if r.take(max_buf()).read_to_end(&mut buf).is_ok() && !buf.is_empty() {
             self.scan_buf(&format!("{path}!{how}"), &buf, depth + 1);
         }
     }
@@ -375,7 +387,7 @@ impl Ctx<'_> {
         let Ok(mut z) = zip::ZipArchive::new(Cursor::new(data)) else { return };
         for i in 0..z.len() {
             let Ok(mut e) = z.by_index(i) else { continue };
-            if !e.is_file() || e.size() > MAX_UNPACKED {
+            if !e.is_file() || e.size() > max_buf() {
                 continue;
             }
             let name = format!("{path}!{}", e.name());
@@ -392,7 +404,7 @@ impl Ctx<'_> {
         let Ok(entries) = a.entries() else { return };
         for e in entries.flatten() {
             let mut e = e;
-            if !e.header().entry_type().is_file() || e.size() > MAX_UNPACKED {
+            if !e.header().entry_type().is_file() || e.size() > max_buf() {
                 continue;
             }
             let name = format!("{path}!{}", e.path().map(|p| p.display().to_string()).unwrap_or_default());
@@ -406,7 +418,7 @@ impl Ctx<'_> {
     fn scan_reader(&mut self, path: &str, mut r: impl Read, len: u64) -> io::Result<()> {
         self.files += 1;
         self.bytes += len;
-        if len <= MAX_IN_MEMORY {
+        if len <= max_buf() {
             let mut buf = Vec::with_capacity(len as usize);
             r.read_to_end(&mut buf)?;
             self.scan_buf(path, &buf, 0);
