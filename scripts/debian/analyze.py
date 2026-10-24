@@ -25,14 +25,14 @@ DOC_PATH = re.compile(r"^/usr/share/(doc|man|info)/")
 # source shipped for other packages to build against, not to run here: a
 # golang-*-dev package ships upstream's whole tree under /usr/share/gocode/src,
 # including per-OS variants (root_darwin_armx.go) never compiled on Debian
-SOURCE_PATH = re.compile(r"^/usr/(share/gocode/src|src)/")
+SOURCE_PATH = re.compile(r"^/usr/(share/gocode/src|src|include)/")
 
 index = {r["deb"]: r for r in csv.DictReader(open(f"{out}/index.tsv"), delimiter="\t")}
 
 # Only results from a deb that finished count: an aborted job can leave an empty
 # or half-written res file, which the next run.sh overwrites when it redoes the deb.
 complete = set(os.listdir(f"{out}/done")) if os.path.isdir(f"{out}/done") else set()
-findings, partial = [], 0
+findings, partial, superseded = [], 0, set()
 for fn in os.listdir(f"{out}/res"):
     if complete and fn[:-6] not in complete:
         partial += 1
@@ -44,11 +44,20 @@ for fn in os.listdir(f"{out}/res"):
             except json.JSONDecodeError:
                 partial += 1
                 continue
-            f["deb"] = index.get(f["nar"], {})
+            # The index holds one version per package, the newest across the suite
+            # and its overlays. Results for any other version are leftovers from an
+            # earlier index and would report an already-fixed version alongside it.
+            if f["nar"] not in index:
+                superseded.add(f["nar"])
+                continue
+            f["deb"] = index[f["nar"]]
             findings.append(f)
 if partial:
     print(f"skipped {partial} incomplete result file(s)/line(s) — re-run run.sh to redo those debs",
           file=sys.stderr)
+if superseded:
+    print(f"ignored {len(superseded)} deb(s) absent from index.tsv (superseded version or a "
+          f"different target list); re-run run.sh to scan the current ones", file=sys.stderr)
 
 def pkg(f):
     return f["deb"].get("package") or f["nar"]

@@ -43,6 +43,22 @@ like a trust store (from `Contents-*`), and packages built by Go, Rust or Node (
 `Sources` `Build-Depends`), which is where compiled-in roots live. It is a shortlist,
 not an answer — a C program with a root array in a `.c` file is invisible to both.
 
+### Suites and security updates
+
+`index.sh` indexes `$SUITE` plus, for a stable suite, `$SUITE-security` (from
+`$SECURITY_MIRROR`) and `$SUITE-updates`, and `mkindex.py` keeps the newest version
+of each package. Without the overlays the scan describes the release as first
+shipped, not an updated machine: `ca-certificates` in `dists/trixie` still ships
+`emSign_ECC_Root_CA_-_G3.crt` and `Comodo_AAA_Services_root.crt`, which
+`20250419+deb13u1` in `trixie-security` removes, and browsers are several releases
+behind — precisely the packages whose fix *is* a version bump. Unstable has no
+overlays, since its fixes go straight into the suite. `OVERLAYS=` disables them.
+
+Re-running `index.sh` on an existing output directory picks the overlays up, and the
+newly chosen versions are simply debs with no `done` marker, so `run.sh` scans just
+those. `analyze.py` ignores results for any deb no longer in `index.tsv`, so the
+superseded versions drop out of the report instead of doubling it.
+
 ## 3. Whole archive (69,913 packages, 120.2 GiB — trixie amd64, all four components)
 
     python3 scripts/debian/mkcandidates.py out all
@@ -87,9 +103,10 @@ Classes needing a fix: `vendored-pem-file`, `vendored-in-archive`, `vendored-key
 `compiled-in`, `vendored-other`. Classed apart and kept out of `list.md`:
 `system-store` (ca-certificates itself), `copy-of-system-store` (byte-identical),
 `test-data` (`t/`, `testdata/`, `_test.go` — the archive is full of these),
-`source-shipment` (`/usr/share/gocode/src`, `/usr/src` — source for others to build
-against, where per-OS variants Debian never compiles live), `docs-or-examples`, and
-the sub-threshold `partial-root-set` / `fixture-or-other`.
+`source-shipment` (`/usr/share/gocode/src`, `/usr/src`, `/usr/include` — source and
+headers for others to build against, where per-OS variants Debian never compiles
+live), `docs-or-examples`, and the sub-threshold `partial-root-set` /
+`fixture-or-other`.
 
 A hit means the bundle is *in* the package, not that the program uses it. Debian's
 `nodejs` configures `--openssl-use-def-ca-store` (`debian/rules`), so the 142 roots
