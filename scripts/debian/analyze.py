@@ -29,13 +29,26 @@ SOURCE_PATH = re.compile(r"^/usr/(share/gocode/src|src)/")
 
 index = {r["deb"]: r for r in csv.DictReader(open(f"{out}/index.tsv"), delimiter="\t")}
 
-findings = []
+# Only results from a deb that finished count: an aborted job can leave an empty
+# or half-written res file, which the next run.sh overwrites when it redoes the deb.
+complete = set(os.listdir(f"{out}/done")) if os.path.isdir(f"{out}/done") else set()
+findings, partial = [], 0
 for fn in os.listdir(f"{out}/res"):
+    if complete and fn[:-6] not in complete:
+        partial += 1
+        continue
     with open(f"{out}/res/{fn}") as fh:
         for line in fh:
-            f = json.loads(line)
+            try:
+                f = json.loads(line)
+            except json.JSONDecodeError:
+                partial += 1
+                continue
             f["deb"] = index.get(f["nar"], {})
             findings.append(f)
+if partial:
+    print(f"skipped {partial} incomplete result file(s)/line(s) — re-run run.sh to redo those debs",
+          file=sys.stderr)
 
 def pkg(f):
     return f["deb"].get("package") or f["nar"]
