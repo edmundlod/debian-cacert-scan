@@ -553,9 +553,25 @@ fn walk(ctx: &mut Ctx, p: &Path) -> io::Result<()> {
     Ok(())
 }
 
+// top-level tar on stdin: one entry per member, so huge members still take the chunked path
+fn tar_stream(ctx: &mut Ctx, r: impl Read) -> io::Result<()> {
+    let mut a = tar::Archive::new(r);
+    for e in a.entries()? {
+        let mut e = e?;
+        if !e.header().entry_type().is_file() {
+            continue;
+        }
+        let size = e.size();
+        let name = e.path().map(|p| p.display().to_string()).unwrap_or_default();
+        let name = name.strip_prefix("./").unwrap_or(&name).to_owned();
+        ctx.scan_reader(&format!("/{name}"), &mut e, size)?;
+    }
+    Ok(())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let usage = "usage: cacert-scan [--roots ROOTS.pem] [--watch WATCH.pem] (--nar LABEL < file.nar | --path DIR...)\n\
+    let usage = "usage: cacert-scan [--roots ROOTS.pem] [--watch WATCH.pem] (--nar LABEL < file.nar | --tar LABEL < file.tar | --path DIR...)\n\
                  --roots and --watch default to $CACERT_SCAN_ROOTS and $CACERT_SCAN_WATCH";
     let get = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let roots = get("--roots").or_else(|| std::env::var("CACERT_SCAN_ROOTS").ok());
@@ -571,6 +587,9 @@ fn main() {
         ctx.nar = label.clone();
         let mut r = BufReader::with_capacity(1 << 20, io::stdin().lock());
         nar_expect(&mut r, b"nix-archive-1").and_then(|_| nar_node(&mut ctx, &mut r, &label))
+    } else if let Some(label) = get("--tar") {
+        ctx.nar = label.clone();
+        tar_stream(&mut ctx, BufReader::with_capacity(1 << 20, io::stdin().lock()))
     } else if let Some(i) = args.iter().position(|a| a == "--path") {
         args[i + 1..].iter().try_for_each(|p| {
             ctx.nar = p.clone();
