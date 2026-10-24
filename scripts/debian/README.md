@@ -70,8 +70,11 @@ Classes needing a fix: `vendored-pem-file`, `vendored-in-archive`, `vendored-key
 `compiled-in`, `vendored-other`. Classed apart and kept out of `list.md`:
 `system-store` (ca-certificates itself), `copy-of-system-store` (byte-identical),
 `test-data` (`t/`, `testdata/`, `_test.go` — the archive is full of these),
-`docs-or-examples`, and the sub-threshold `partial-root-set` / `fixture-or-other`.
+`source-shipment` (`/usr/share/gocode/src`, `/usr/src` — source for others to build
+against, where per-OS variants Debian never compiles live), `docs-or-examples`, and
+the sub-threshold `partial-root-set` / `fixture-or-other`.
 
-A hit means the bundle is *in* the package, not that the program uses it — Debian's
-`nodejs` embeds roots in `libnode.so` but may still default to the OpenSSL store.
-Same caveat as upstream's README.
+A hit means the bundle is *in* the package, not that the program uses it. Debian's
+`nodejs` configures `--openssl-use-def-ca-store` (`debian/rules`), so the 142 roots
+in `libnode.so` are reachable only via `--use-bundled-ca`. Check each package's
+build before calling a hit a vulnerability. Same caveat as upstream's README.

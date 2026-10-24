@@ -22,6 +22,10 @@ AAA = "AAA Certificate Services"
 SYSTEM_STORE_PKGS = ("ca-certificates", "ca-certificates-java", "ca-certificates-mono")
 TEST_PATH = re.compile(r"(^|/)(t|test|tests|testdata|fixtures?|examples?)/|_test\.go$|\.t$")
 DOC_PATH = re.compile(r"^/usr/share/(doc|man|info)/")
+# source shipped for other packages to build against, not to run here: a
+# golang-*-dev package ships upstream's whole tree under /usr/share/gocode/src,
+# including per-OS variants (root_darwin_armx.go) never compiled on Debian
+SOURCE_PATH = re.compile(r"^/usr/(share/gocode/src|src)/")
 
 index = {r["deb"]: r for r in csv.DictReader(open(f"{out}/index.tsv"), delimiter="\t")}
 
@@ -57,6 +61,8 @@ def classify(f):
             return "docs-or-examples"
         if TEST_PATH.search(f["file"]):
             return "test-data"
+        if SOURCE_PATH.search(f["file"].split("!")[0]):
+            return "source-shipment"
         if archive:
             return "vendored-in-archive"
         if f.get("magic") in ("jks", "jceks", "pkcs12"):
